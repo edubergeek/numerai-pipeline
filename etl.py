@@ -37,15 +37,23 @@ from naiETL import _floatvector_feature, _float_feature, _int64_feature, _bytes_
 
 # +
 IS_JUPYTER = False
+#--train --split_valid --all --split 0.20 --shard 4096
 
 if IS_JUPYTER:
   sys.argv.append('--train')
-  sys.argv.append('--eras')
-  sys.argv.append('--balance')
+  sys.argv.append('--split_valid')
+  sys.argv.append('--all')
   sys.argv.append('--split')
-  sys.argv.append('0.04')
+  sys.argv.append('0.05')
   sys.argv.append('--shard')
-  sys.argv.append('1024')
+  sys.argv.append('4096')
+  #sys.argv.append('--eras')
+  #sys.argv.append('--balance')
+  #sys.argv.append('--split')
+  #sys.argv.append('0.05')
+  #sys.argv.append('--shard')
+  #sys.argv.append('2048')
+
 
 
 # +
@@ -53,11 +61,13 @@ if IS_JUPYTER:
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--train", action='store_true', help="ETL training set")
+parser.add_argument("--all", action='store_true', help="Combine training and validation examples")
 parser.add_argument("--live", action='store_true', help="ETL live data")
 parser.add_argument("--eras", action='store_true', help="ETL by era")
+parser.add_argument("--split_valid", action='store_true', help="Apply split to validation set only")
 parser.add_argument("--balance", action='store_true', help="balance target values by era")
-parser.add_argument("--shard", type=int, default=1024, help="shard size")
-parser.add_argument("--split", type=float, default=0.02, help="valid split percentage")
+parser.add_argument("--shard", type=int, default=2048, help="shard size")
+parser.add_argument("--split", type=float, default=0.1, help="validation split percentage")
 parser.add_argument("--dir", default='./data', help="directory to save TFRecord files in")
 
 
@@ -78,25 +88,35 @@ dataRoot = args.dir
 if not os.path.exists(dataRoot):
   os.makedirs(dataRoot)
 
-# !rm -f data/*
+# +
+# #!rm -f data/*
+# -
 
 etl = NumeraiETL('.', dataRoot, valid_split = args.split, shard_size = args.shard)
 
-etl.OpenDatasets(byEra=args.eras)
+# If in balance mode don't step on train, valid, test data file prefixes
+if args.balance:
+  etl.outputPart = [None, "balance", "balanceval", "ignore"]
+
+etl.OpenDatasets(byEra=args.eras, balance=args.balance)
 
 if args.train:
   # Load training examples with train/valid split
   print("Loading training dataset ...")
-  etl.Load(TrainingSet.TRAIN)
+  reload = not args.all
+  etl.Load(TrainingSet.TRAIN, reload=reload)
   print("Sharding %d training examples ..." % (etl.examples[TrainingSet.TRAIN]))
   etl.SaveDataset(TrainingSet.TRAIN, TrainingSet.TRAIN, byEra=args.eras, balance=args.balance)
-  print("Sharding %d validation examples ..." % (etl.examples[TrainingSet.VALID]))
-  etl.SaveDataset(TrainingSet.TRAIN, TrainingSet.VALID, byEra=args.eras, balance=args.balance)
+  if args.all:
+    print("Sharding %d validation as training examples ..." % (etl.examples[TrainingSet.VALID]))
+    etl.SaveDataset(TrainingSet.TRAIN, TrainingSet.VALID, byEra=args.eras, balance=args.balance)
   # Load validation examples with train/valid split
   print("Loading validation dataset ...")
-  etl.Load(TrainingSet.VALID)
-  print("Sharding %d training examples ..." % (etl.examples[TrainingSet.TRAIN]))
-  etl.SaveDataset(TrainingSet.VALID, TrainingSet.TRAIN, byEra=args.eras, balance=args.balance)
+  etl.Load(TrainingSet.VALID, reload=reload)
+  if args.all:
+    print("Sharding %d training examples ..." % (etl.examples[TrainingSet.TRAIN]))
+    etl.SaveDataset(TrainingSet.VALID, TrainingSet.TRAIN, byEra=args.eras, balance=args.balance)
+
   print("Sharding %d validation examples ..." % (etl.examples[TrainingSet.VALID]))
   etl.SaveDataset(TrainingSet.VALID, TrainingSet.VALID, byEra=args.eras, balance=args.balance)
 
@@ -106,6 +126,4 @@ if args.live:
 
 etl.CloseDatasets()
 print("Finished")
-
-
 
