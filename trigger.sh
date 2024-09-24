@@ -13,7 +13,7 @@ echo $current >$ROUND_FILE
 
 #Set NAI tokens as environment variables
 #$NAI_SECRET and $NAI_IDENTITY
-source ./nairc
+source ./.nairc
 mkdir -p ./round
 
 # Create a subdirectory for the new round
@@ -21,7 +21,7 @@ bash newround.sh
 cd round/$current
 
 # Download live data 
-python download.py --live
+python download.py --live --version ${DR_VERSION}
 
 # Transform parquet file(s) to TFRecord files
 mkdir ./data
