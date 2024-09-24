@@ -5,7 +5,7 @@ ETLDIR=./live
 python download.py --live --version 5.0
 python etl.py --live --dir $ETLDIR
 
-MODELS='gneiss diorite gabbro'
+MODELS='cnn mlp'
 
 for m in $MODELS
 do
