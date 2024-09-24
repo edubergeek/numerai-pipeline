@@ -85,7 +85,7 @@ class ETL():
     # the TFRecord file containing the training set
     shard = int(n / self.shardSize)
     if self.partitionTag is None:
-      path = '%s/%s_%d.tfr' % (self.outputDir, self.outputPart[training_set], shard)
+      path = '%s/%s_%d.tfr' % (self.outputDir, self.outputPart[training_set], self.seqnum)
     else:
       path = '%s/%s_%s_%d.tfr' % (self.outputDir, self.outputPart[training_set], self.partitionTag, shard)
     print(path, n)
@@ -141,15 +141,18 @@ class ETL():
 
 
 class NumeraiETL(ETL):
-  def __init__(self, root_dir, output_dir, shard_size = 1000, valid_split=0.01, feature_cols = None, trainfile='train.parquet', validfile='validation.parquet', testfile='live.parquet'):
+  def __init__(self, root_dir, output_dir, shard_size = 1000, valid_split=0.01, only_split_valid = False, feature_cols = None, trainfile='train.parquet', validfile='validation.parquet', testfile='live.parquet'):
     train_split = 1.0 - valid_split
     super().__init__(root_dir, output_dir, shard_size, train_split, valid_split)
     dt = datetime.now()
     self.testfile = testfile
     self.trainfile = trainfile
+    self.trainSplit = train_split
+    self.splitValidOnly = only_split_valid
     self.validfile = validfile
     self.validSplit = valid_split
     self.writer = None
+    self.seqnum = 0
     self.counter = [0,0,0,0]
     self.examples = [0,0,0,0]
     self.mask = [np.ones((1)),np.ones((1)),np.ones((1)),np.ones((1))]
@@ -164,7 +167,7 @@ class NumeraiETL(ETL):
       ]
     return self.writer
 
-  def OpenDatasets(self, byEra=False):
+  def OpenDatasets(self, byEra=False, balance=False):
     # note that validation eras are > training examples and train begins with era 1
     self.eranum = 1
     if byEra:
@@ -174,8 +177,14 @@ class NumeraiETL(ETL):
   def Split(self, mode, examples):
     self.mask[mode] = np.ones((examples), dtype=np.int8)
     nValid = int(self.validSplit * examples)
-    filtered = np.random.choice(examples, nValid, replace=False)
-    self.mask[mode][filtered] = 0
+    if self.splitValidOnly:
+      if mode == TrainingSet.TRAIN:
+        nValid = 0
+      else:
+        self.mask[mode][nValid:] = 0
+    else:
+      filtered = np.random.choice(examples, nValid, replace=False)
+      self.mask[mode][filtered] = 0
     self.examples[TrainingSet.TRAIN] += examples - nValid
     self.examples[TrainingSet.VALID] += nValid
     self.nExamples = examples
@@ -195,6 +204,14 @@ class NumeraiETL(ETL):
     # after this, check self.mask[mode] whether an index is in train (True) or valid (False)
     if not reload:
       self.Split(mode, table.num_rows)
+    else:
+      self.nExamples = table.num_rows
+      if mode == TrainingSet.VALID:
+        self.mask[mode] = np.zeros((self.nExamples), dtype=np.int8)
+      else:
+        self.mask[mode] = np.ones((self.nExamples), dtype=np.int8)
+      self.examples[mode] = self.nExamples
+      self.seqnum = 0
 
     eranum = table["era"][0].as_py()
     print(eranum)
@@ -264,8 +281,6 @@ class NumeraiETL(ETL):
 
   def SaveDataset(self, dataset, mode, byEra=False, balance=False):
     cursor = mode
-    if balance:
-      byEra = True
     #if byEra:
     #  self.SetPartitionTag("era%d" % (self.eranum))
     # Make sure we have initialized a writer
@@ -274,7 +289,20 @@ class NumeraiETL(ETL):
       if mode == TrainingSet.TEST or self.mask[dataset][m] == (mode == TrainingSet.TRAIN):
         example, eranum, examples, target = self.TrainingExample(m)
         # if writing TFRecord per era check for a new era
-        if byEra and eranum != self.eranum:
+        #if balance and (eranum // 4) != (self.eranum // 4):
+        #  print(eranum, self.eranum, self.seqnum)
+        #  # if a new era then close the current era
+        #  # init the new era
+        #  self.eranum = eranum // 4
+        #  # todo save counter for each partition and cursor/mode
+        #  if self.counter[cursor] > 0:
+        #    self.writer[cursor].close()
+        #    print(self.counter[cursor], 'examples')
+        #    self.seqnum += 1
+        #    self.writer[cursor] = tf.io.TFRecordWriter(self.OutputPath(cursor, self.counter[cursor]))
+        #    self.counter[cursor] = 0
+  
+        if (not balance) and byEra and eranum != self.eranum:
           # if a new era then close the current era
           self.writer[cursor].close()
           # init the new era
@@ -304,7 +332,9 @@ class NumeraiETL(ETL):
             if self.counter[cursor] % self.shardSize == 0:
               if self.counter[cursor] > 0:
                 self.writer[cursor].close()
+                self.seqnum += 1
                 self.writer[cursor] = tf.io.TFRecordWriter(self.OutputPath(cursor, self.counter[cursor]))
+              self.counter[cursor] = 0
             self.writer[cursor].write(example[e].SerializeToString())
             self.counter[cursor] += 1
 
