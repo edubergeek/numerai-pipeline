@@ -4,7 +4,7 @@ trainAll=true
 trainEra=false
 
 # Launch tensorboard if needed
-useTensorboard=1
+useTensorboard=0
 tb=`ps -ef|grep tensorboard | wc -l`
 case $((tb*useTensorboard)) in
 1) echo "Launching Tensorboard"
@@ -45,11 +45,11 @@ esac
 # Autotrain Config:
 cat <<EOF >train.conf
 model		target	ver	rev	trial	arch	epoch	epochs	batch	lr	epsilon	loss	monitor		mode	begin	transform
-mlp		0	1	2	1	NR	0	50	1024	1e-4	0.0	mae	val_loss	all	0	NaN,2,2|Slice,0,2376
+mlp		36	1	2	1	NR	0	50	1024	1e-4	0.0	mae	val_loss	all	0	NaN,2,2|Slice,0,2376
+cnn 		37	1	1	1	NR	0	50	1024	1e-4	0.0	mae	val_loss	all	0	NaN,2,2|Slice,0,2376|YX,2376,1
 EOF
-#mlp		0	1	2	1	NR	0	50	1024	1e-4	0.0	mae	val_loss	all	0	NaN,2,2|Slice,0,2376
 
-MODELS='mlp'
+MODELS='mlp cnn'
 
 for m in $MODELS
 do
