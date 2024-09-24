@@ -2,10 +2,10 @@
 
 ETLDIR=./live
 
-python download.py --live
+python download.py --live --version 5.0
 python etl.py --live --dir $ETLDIR
 
-MODELS='cnn'
+MODELS='gneiss diorite gabbro'
 
 for m in $MODELS
 do
