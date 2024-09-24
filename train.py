@@ -9,8 +9,11 @@ import argparse
 import tensorflow as tf
 import lightgbm as lgb
 from tensorflow import keras
+from tensorflow.keras.metrics import SparseCategoricalAccuracy
+from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, TensorBoard
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, AdamW
+from keras.optimizers.schedules import LearningRateSchedule
 from tensorflow.keras.layers import Dense, Flatten, Reshape, Dropout, Input, Concatenate, BatchNormalization, Conv1DTranspose
 from tensorflow.keras.layers import Conv1D, Conv2D, MaxPooling1D, Conv3D
 from xgboost import XGBRegressor
@@ -141,13 +144,45 @@ def replace_Sparse(features, targets):
       if t['name'] == 'Sparse':
         nClass = float(t['arg1'])
         #targetVal = float(t['arg2'])
-        targets = targets * tf.constant(nClass, dtype=tf.float32)
-        #targets = tf.one_hot(targets, 5)
+        #targets = targets * tf.constant(nClass, dtype=tf.float32)
+        targets = tf.one_hot(targets, nClass)
     return features, targets
 
 def remap_autoencoder(features, targets):
     return features, (features, targets)
  
+
+
+# %%
+class WarmUpCosine(LearningRateSchedule):
+  def __init__(
+    self, learning_rate_base, total_steps, warmup_learning_rate, warmup_steps
+  ):
+    super().__init__()
+
+    self.learning_rate_base = learning_rate_base
+    self.total_steps = total_steps
+    self.warmup_learning_rate = warmup_learning_rate
+    self.warmup_steps = warmup_steps
+    self.pi = tf.constant(np.pi)
+
+  def __call__(self, step):
+    if self.total_steps < self.warmup_steps:
+      raise ValueError("Total_steps must be larger or equal to warmup_steps.")
+
+    cos_annealed_lr = tf.cos(self.pi * (tf.cast(step, tf.float32) - self.warmup_steps) / float(self.total_steps - self.warmup_steps))
+    learning_rate = 0.5 * self.learning_rate_base * (1 + cos_annealed_lr)
+
+    if self.warmup_steps > 0:
+      if self.learning_rate_base < self.warmup_learning_rate:
+        raise ValueError(
+          "Learning_rate_base must be larger or equal to "
+          "warmup_learning_rate."
+          )
+      slope = (self.learning_rate_base - self.warmup_learning_rate) / self.warmup_steps
+      warmup_rate = slope * tf.cast(step, tf.float32) + self.warmup_learning_rate
+      learning_rate = tf.where(step < self.warmup_steps, warmup_rate, learning_rate)
+    return tf.where(step > self.total_steps, 0.0, learning_rate, name="learning_rate")
 
 
 # %%
@@ -186,7 +221,7 @@ class NumeraiModel():
       self.model = lgb.Booster(model_file=self.modelFile)
     else:
       self.model = tf.keras.models.load_model(self.modelFile)
-      if self.hparam['arch'] == 'NC':
+      if self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'CC':
         self.Compile(self.model, loss='sparse_categorical_crossentropy', metric=['accuracy'])
       else:
         self.Compile(self.model)
@@ -328,9 +363,22 @@ class NumeraiModel():
 
     self.isTrained = False
 
+  def LRDecay(self, initial_lr = 0):
+    lr_warmup_decayed_fn = CosineDecay(initial_lr, decay_steps=self.hparam['decay_steps'], warmup_target=self.hparam['lr'], warmup_steps=self.hparam['warmup'])
+    return lr_warmup_decayed_fn
+
   def Compile(self, model, loss=None, metric=None, loss_weight=None):
-    # compile the model
-    self.optimizer = Adam(learning_rate=self.hparam['lr'])
+    # compile the model  
+
+    if self.hparam['arch'] == 'CC':
+      total_steps = int(self.hparam['steps'] / self.batchSize * self.epochs)
+      warmup_epoch_percentage = 0.10
+      warmup_steps = int(total_steps * warmup_epoch_percentage)
+      #scheduled_lrs = WarmUpCosine(learning_rate_base=self.learning_rate,total_steps=total_steps, warmup_learning_rate=0.0, warmup_steps=warmup_steps)
+      #scheduled_lrs = LRDecay()
+      self.optimizer = AdamW(learning_rate=self.hparam['lr'], weight_decay=self.hparam['decay'])
+    else:
+      self.optimizer = Adam(learning_rate=self.hparam['lr'])
     if self.hparam['arch'] == 'AE':
       losses = {
         "target_output": self.loss,
@@ -338,6 +386,10 @@ class NumeraiModel():
       }
       lossWeights = {"target_output": 1.0, "input_output": self.hparam['epsilon']}
       model.compile(optimizer=self.optimizer, loss=losses, loss_weights=lossWeights, metrics=metric)
+    elif self.hparam['arch'] == 'CC':
+      loss = SparseCategoricalCrossentropy(from_logits=True)
+      metrics = [SparseCategoricalAccuracy(name="accuracy"),]
+      model.compile( optimizer=self.optimizer, loss=loss, metrics=metrics)
     else:
       if loss is None:
         loss = self.loss
@@ -374,7 +426,7 @@ class NumeraiModel():
     # model.Train()
     # elif arch == 'LGB':
     #  model.Train()
-    if not (self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'NR'):
+    if not (self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'NR' or self.hparam['arch'] == 'CC'):
       print("Unsupported arch=%s in Train" %(self.hparam['arch']))
       return 0
     
@@ -523,33 +575,42 @@ PROGRESS_INTERVAL = 10
 # %%
 if IS_JUPYTER:
   sys.argv.append('--epochs')
-  sys.argv.append('50')
+  sys.argv.append('10')
   sys.argv.append('--target')
-  sys.argv.append('28')
+  sys.argv.append('0')
   sys.argv.append('--batch_size')
-  sys.argv.append('1024')
+  sys.argv.append('128')
+  #sys.argv.append('--steps')
+  #sys.argv.append('2940')
   sys.argv.append('--lr')
-  sys.argv.append('1e-3')
-  sys.argv.append('--epsilon')
-  sys.argv.append('20.0')
+  sys.argv.append('3e-5')
+  sys.argv.append('--decay')
+  sys.argv.append('1e-6')
+  #sys.argv.append('--epsilon')
+  #sys.argv.append('20.0')
+  sys.argv.append('--model')
+  sys.argv.append('m33')
+  sys.argv.append('--arch')
+  sys.argv.append('NR')
   sys.argv.append('--monitor')
   sys.argv.append('val_loss')
-  sys.argv.append('--model')
-  sys.argv.append('gabbro')
-  sys.argv.append('--arch')
-  sys.argv.append('AE')
   sys.argv.append('--version')
-  sys.argv.append('1')
-  sys.argv.append('--round')
-  sys.argv.append('1')
+  sys.argv.append('8')
   sys.argv.append('--revision')
-  sys.argv.append('0')
+  sys.argv.append('4')
   sys.argv.append('--trial')
   sys.argv.append('1')
+  sys.argv.append('--transform')
+  sys.argv.append('NaN,0,0|Slice,0,2304|YX,72,32')
+  sys.argv.append('--trainpat')
+  sys.argv.append('balance_*.tfr')
+  sys.argv.append('--validpat')
+  sys.argv.append('balanceval_*.tfr')
+  sys.argv.append('--round')
+  sys.argv.append('0')
   sys.argv.append('--epoch')
   sys.argv.append('0')
-  sys.argv.append('--transform')
-  sys.argv.append('YX,164,13')
+  #sys.argv.append('Slice,0,1536|XY,48,32|Sparse,5')
   #sys.argv.append('NaN,-1,-1|Slice,0,1536|XY,48,32')
   #sys.argv.append('--transform')
   #sys.argv.append('Slice,0,1050')
@@ -589,9 +650,13 @@ parser.add_argument("--ensemble1", default='-', help="1st ensemble model,arch,ve
 parser.add_argument("--etransform", default='-', help="post-ensemble transform")
 parser.add_argument("--ensemble2", default='-', help="2nd ensemble model,arch,version")
 parser.add_argument("--batch_size", type=int, default=8192, help="batch size")
+parser.add_argument("--steps", type=int, default=1000, help="total training steps")
+parser.add_argument("--decay_steps", type=int, default=100, help="decay steps")
+parser.add_argument("--decay", type=float, default=1e-4, help="decay rate")
 parser.add_argument("--target", type=int, default=0, help="target index")
 parser.add_argument('--train', action='store_true')
 parser.add_argument('--tensorboard', action='store_true')
+parser.add_argument('--loadtrial', action='store_true')
 parser.add_argument('--trainera', action='store_true')
 parser.add_argument('--datadir', default="./data", help='data directory')
 parser.add_argument('--trainpat', default="train*.tfr", help='training file glob pattern')
@@ -627,6 +692,9 @@ hyperParam['begin'] = args.begin
 hyperParam['patience'] = args.patience
 hyperParam['threshold'] = args.threshold
 hyperParam['lr'] = args.lr
+hyperParam['decay'] = args.decay
+hyperParam['steps'] = args.steps
+hyperParam['decay_steps'] = args.decay_steps
 hyperParam['epsilon'] = args.epsilon
 hyperParam['arch'] = args.arch
 hyperParam['loss'] = args.loss
@@ -680,7 +748,7 @@ with strategy.scope():
   nm = NumeraiModel(args.model, hyperParam)
 
 
-# %%
+  # %%
   ds = nm.DataSet(args.datadir, args.trainpat)
   dsv = nm.DataSet(args.datadir, args.validpat)
 
@@ -688,7 +756,10 @@ with strategy.scope():
 # %%
 with strategy.scope():
   # Train the model
-  #nm.modelRevision = 0
+  #if args.trial:
+  #  nm.modelTrial = args.trial
+  #else:
+  #  nm.modelTrial = 1
   nm.modelTrial = 1
   nm.sModelPath = os.path.join(".", nm.GetModelName())
   nm.SetLoss(hyperParam['loss'])
