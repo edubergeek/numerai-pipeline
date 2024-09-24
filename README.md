@@ -1,7 +1,7 @@
 # numerai-pipeline
 Project: Numerai Pipeline
 Author:  Curt Dodds
-Date:    2024-02-03
+Date:    2024-09-24
 Github:  https://github.com/edubergeek/numerai-pipeline/
 
 ## Getting Started
@@ -35,18 +35,24 @@ Once you have a model you can train it.
 ### Train the model(s)
 Use the bash script 'train.sh' to train one or more models.
 Edit the embedded configuration parameters for your model then run the script to begin training.
-If you run in Jupyter be sure to set the IS_JUPYTER flag to True.
+If you run in Jupyter be sure to set the IS_JUPYTER flag in predict.py to True.
 If running from the command line the IS_JUPYTER flag needs to be False.
-Because I have a Linux background and training can run a long time I usually run from the command line.
-I use X11 forwarding with ssh (Putty and XMing on Windows) and I get a nice training plot.
+Because training can run a long time I usually run from the command line but Jupyter is useful in dev mode.
+By using X11 forwarding with ssh (Putty and XMing on Windows) I get a nice training plot. 
+I added Tensorboard support so that's a useful option if not useing X11 forwarding.
+
+
 The default behavior is to only save weights when the validation loss improves.
-A script "bestepoch.sh" can be run after training is complete.
+The script "bestepoch.sh" can be run after training is complete.
 It will select the training epoch that had the lowest validation loss.
-Obviously this is just the highest numbered epoch.
+Obviously this is just the highest numbered epoch so it's a convenience script.
 
 ## Usage
-bash prepare.sh
-bash predict.sh
+-    bash prepare.sh - download training data and train models
+-    bash predict.sh - download live data, predict and submit predictions
+
+## Release Notes
+-    1.0 - added support for ATLAS data release
 
 ## Todo
 There are endless improvements to be made to any software project.
