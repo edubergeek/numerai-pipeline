@@ -32,10 +32,24 @@ from numerapi import NumerAPI
 # napi.download_dataset("v4.2/meta_model.parquet", "meta_model.parquet")
 # ```
 
+# # Atlas
+# ```
+# version="5.0"
+# napi.download_dataset("v%s/features.json" %(version), "features.json")
+# napi.download_dataset("v%s/train.parquet" %(version), "train.parquet")
+# napi.download_dataset("v%s/validation.parquet" %(version), "validation.parquet")
+# napi.download_dataset("v%s/validation_example_preds.parquet" %(version), "validation_example_preds.parquet")
+#
+# #napi.download_dataset("v%s/live_int8.parquet" %(version), "live_int8.parquet")
+# #napi.download_dataset("v%s/live_example_preds.parquet" %(version), "live_example_preds.parquet")
+# #napi.download_dataset("v%s/meta_model.parquet" %(version), "meta_model.parquet")
+# ```
+
 class NumeraiAPI:
   DR_SUNSHINE = "4.1"
   DR_RAIN = "4.2"
   DR_MIDNIGHT = "4.3"
+  DR_ATLAS = "5.0"
   LIVEDATA = "live.parquet"
   TRAINDATA = "train.parquet"
   VALIDDATA = "validation.parquet"
@@ -47,7 +61,7 @@ class NumeraiAPI:
     self.secretKey = os.getenv("NAI_SECRET")
     self.submission = {}
     # Default to RAIN values
-    self.version = self.DR_RAIN
+    self.version = self.DR_ATLAS
     self.archive="parquet"
     self.type="_int8"
     self.trainPrefix="train"
@@ -78,6 +92,8 @@ class NumeraiAPI:
       self.type="_int8"
     elif version == self.DR_MIDNIGHT:
       self.type="_int8"
+    elif version == self.DR_ATLAS:
+      self.type=""
     else:
       return
     self.trainSuffix=self.type
