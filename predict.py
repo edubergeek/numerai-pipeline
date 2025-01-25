@@ -45,6 +45,37 @@ def reshape_C6(features):
         features['x'] = tf.transpose(features['x'], perm=[1, 2, 0])        
     return features
 
+def reshape_ZeroPad(features):
+    for t in hyperParam[TRANSFORM]:
+      if t['name'] == 'ZP':
+        # parse a set of feature fragments into an MxN matrix of features
+        # arg1 stores M:N
+        # arg2 stores the fragment offsets separated by colon
+        # 0:35:325:460:511:836:976:1121:1216:1506:1796:2086:2376
+        # zero padding dimension N
+        arg1 = t['arg1']
+        arg2 = t['arg2']
+        parts = arg1.split(':')
+        yDim = int(parts[0])
+        xDim = int(parts[1])
+        parts = arg2.split(':')
+        for p in range(len(parts)-1):
+          start = int(parts[p])
+          end = int(parts[p+1])
+          xlen = end - start
+          x = tf.slice(features['x'], [start], [xlen])
+          zeropad = tf.constant(0.0, dtype=tf.float32)
+          padlen = xDim - xlen
+          #print("pad length",p,"=",padlen)  
+          pad = tf.repeat(zeropad, padlen)
+          if p == 0:
+            X = tf.concat([x, pad], 0)
+          else:
+            X = tf.concat([X, x, pad], 0)
+        features['x'] = tf.reshape(X, [yDim, xDim])
+        #features = tf.transpose(features, perm=[1, 2, 0])
+    return features
+
 def reshape_YXZ(features):
     for t in hyperParam[TRANSFORM]:
       if t['name'] == 'YXZ':
@@ -201,6 +232,8 @@ class NumeraiModel():
       for t in self.hparam[transform]:
         if t['name'] == 'C6':
           dataset = dataset.map(reshape_C6, num_parallel_calls=at)
+        if t['name'] == 'ZP':
+          dataset = dataset.map(reshape_ZeroPad, num_parallel_calls=at)
         if t['name'] == 'XY':
           dataset = dataset.map(reshape_XY, num_parallel_calls=at)
         if t['name'] == 'YX':

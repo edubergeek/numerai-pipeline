@@ -29,7 +29,7 @@ from naiETL import _floatvector_feature, _float_feature, _int64_feature, _bytes_
 IS_JUPYTER = False
 TRANSFORM = 'transform'
 #Set to index position of the desired training target
-TARGET_IDX = 0
+TARGET_IDX = 36
 
 def decode_tfr(record_bytes):
     schema =  {
@@ -55,6 +55,37 @@ def reshape_C6(features, targets):
         xDim = int(t['arg2'])
         features = tf.reshape(features, [6, yDim, xDim])
         features = tf.transpose(features, perm=[1, 2, 0])
+    return features, targets
+
+def reshape_ZeroPad(features, targets):
+    for t in hyperParam[TRANSFORM]:
+      if t['name'] == 'ZP':
+        # parse a set of feature fragments into an MxN matrix of features
+        # arg1 stores M:N
+        # arg2 stores the fragment offsets separated by colon
+        # 0:35:325:460:511:836:976:1121:1216:1506:1796:2086:2376
+        # zero padding dimension N
+        arg1 = t['arg1']
+        arg2 = t['arg2']
+        parts = arg1.split(':')
+        yDim = int(parts[0])
+        xDim = int(parts[1])
+        parts = arg2.split(':')
+        for p in range(len(parts)-1):
+          start = int(parts[p])
+          end = int(parts[p+1])
+          xlen = end - start
+          x = tf.slice(features, [start], [xlen])
+          zeropad = tf.constant(0.0, dtype=tf.float32)
+          padlen = xDim - xlen
+          #print("pad length",p,"=",padlen)  
+          pad = tf.repeat(zeropad, padlen)
+          if p == 0:
+            X = tf.concat([x, pad], 0)
+          else:
+            X = tf.concat([X, x, pad], 0)
+        features = tf.reshape(X, [yDim, xDim])
+        #features = tf.transpose(features, perm=[1, 2, 0])
     return features, targets
 
 def reshape_ZYX(features, targets):
@@ -300,6 +331,8 @@ class NumeraiModel():
       for t in self.hparam[transform]:
         if t['name'] == 'C6':
           dataset = dataset.map(reshape_C6, num_parallel_calls=at)
+        if t['name'] == 'ZP':
+          dataset = dataset.map(reshape_ZeroPad, num_parallel_calls=at)
         if t['name'] == 'XY':
           dataset = dataset.map(reshape_XY, num_parallel_calls=at)
         if t['name'] == 'YX':
@@ -577,13 +610,13 @@ if IS_JUPYTER:
   sys.argv.append('--epochs')
   sys.argv.append('10')
   sys.argv.append('--target')
-  sys.argv.append('0')
+  sys.argv.append('36')
   sys.argv.append('--batch_size')
   sys.argv.append('128')
   #sys.argv.append('--steps')
   #sys.argv.append('2940')
   sys.argv.append('--lr')
-  sys.argv.append('3e-5')
+  sys.argv.append('1e-5')
   sys.argv.append('--decay')
   sys.argv.append('1e-6')
   #sys.argv.append('--epsilon')
@@ -595,17 +628,17 @@ if IS_JUPYTER:
   sys.argv.append('--monitor')
   sys.argv.append('val_loss')
   sys.argv.append('--version')
-  sys.argv.append('8')
+  sys.argv.append('1')
   sys.argv.append('--revision')
-  sys.argv.append('4')
+  sys.argv.append('0')
   sys.argv.append('--trial')
   sys.argv.append('1')
   sys.argv.append('--transform')
-  sys.argv.append('NaN,0,0|Slice,0,2304|YX,72,32')
+  sys.argv.append('NaN,-1,-1|Slice,0,2376|ZP,12:360,0:35:325:460:511:836:976:1121:1216:1506:1796:2086:2376')
   sys.argv.append('--trainpat')
-  sys.argv.append('balance_*.tfr')
+  sys.argv.append('train*.tfr')
   sys.argv.append('--validpat')
-  sys.argv.append('balanceval_*.tfr')
+  sys.argv.append('valid*.tfr')
   sys.argv.append('--round')
   sys.argv.append('0')
   sys.argv.append('--epoch')
