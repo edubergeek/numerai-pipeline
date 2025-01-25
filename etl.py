@@ -47,6 +47,8 @@ if IS_JUPYTER:
   sys.argv.append('0.05')
   sys.argv.append('--shard')
   sys.argv.append('4096')
+  sys.argv.append('--features')
+  sys.argv.append('features.json')
   #sys.argv.append('--eras')
   #sys.argv.append('--balance')
   #sys.argv.append('--split')
@@ -68,6 +70,7 @@ parser.add_argument("--split_valid", action='store_true', help="Apply split to v
 parser.add_argument("--balance", action='store_true', help="balance target values by era")
 parser.add_argument("--shard", type=int, default=2048, help="shard size")
 parser.add_argument("--split", type=float, default=0.1, help="validation split percentage")
+parser.add_argument("--features", default=None, help="feature metadata file")
 parser.add_argument("--dir", default='./data', help="directory to save TFRecord files in")
 
 
@@ -92,7 +95,7 @@ if not os.path.exists(dataRoot):
 # #!rm -f data/*
 # -
 
-etl = NumeraiETL('.', dataRoot, valid_split = args.split, shard_size = args.shard)
+etl = NumeraiETL('.', dataRoot, feature_meta = args.features, valid_split = args.split, shard_size = args.shard)
 
 # If in balance mode don't step on train, valid, test data file prefixes
 if args.balance:
@@ -113,11 +116,10 @@ if args.train:
   # Load validation examples with train/valid split
   print("Loading validation dataset ...")
   etl.Load(TrainingSet.VALID, reload=reload)
-  if args.all:
-    print("Sharding %d training examples ..." % (etl.examples[TrainingSet.TRAIN]))
-    etl.SaveDataset(TrainingSet.VALID, TrainingSet.TRAIN, byEra=args.eras, balance=args.balance)
-
+  print("Sharding %d training examples ..." % (etl.examples[TrainingSet.TRAIN]))
   print("Sharding %d validation examples ..." % (etl.examples[TrainingSet.VALID]))
+
+  etl.SaveDataset(TrainingSet.VALID, TrainingSet.TRAIN, byEra=args.eras, balance=args.balance)
   etl.SaveDataset(TrainingSet.VALID, TrainingSet.VALID, byEra=args.eras, balance=args.balance)
 
 if args.live:

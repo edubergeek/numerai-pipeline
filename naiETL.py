@@ -4,6 +4,7 @@ from datetime import datetime
 import pyarrow.parquet as pq
 import pyarrow.csv as csv
 import numpy as np
+import json
 
 class TrainingSet(IntEnum):
   DONOTUSE = 0
@@ -141,7 +142,7 @@ class ETL():
 
 
 class NumeraiETL(ETL):
-  def __init__(self, root_dir, output_dir, shard_size = 1000, valid_split=0.01, only_split_valid = False, feature_cols = None, trainfile='train.parquet', validfile='validation.parquet', testfile='live.parquet'):
+  def __init__(self, root_dir, output_dir, shard_size = 1000, valid_split=0.01, only_split_valid = False, feature_meta = None, trainfile='train.parquet', validfile='validation.parquet', testfile='live.parquet'):
     train_split = 1.0 - valid_split
     super().__init__(root_dir, output_dir, shard_size, train_split, valid_split)
     dt = datetime.now()
@@ -151,6 +152,10 @@ class NumeraiETL(ETL):
     self.splitValidOnly = only_split_valid
     self.validfile = validfile
     self.validSplit = valid_split
+    if feature_meta is None:
+      self.featureMap = None
+    else:
+      self.featureMap = self.FeatureMap(feature_meta)
     self.writer = None
     self.seqnum = 0
     self.counter = [0,0,0,0]
@@ -158,6 +163,36 @@ class NumeraiETL(ETL):
     self.mask = [np.ones((1)),np.ones((1)),np.ones((1)),np.ones((1))]
     #self.OpenDatasets()
     
+  def FeatureMap(self, meta_file):
+    feature_metadata = json.load(open(meta_file))
+    traits = ('intelligence','charisma','strength','dexterity','constitution','wisdom','agility','serenity')
+    feature_map = [feature_metadata["feature_sets"][trait] for trait in traits]
+    return feature_map
+
+  def FeatureColsFromMap(self, colMap, first, last, include_all=True):
+    feature_col = []
+    all_cols = range(first, last+1)
+    #traits = ('intelligence','charisma','strength','dexterity','constitution','wisdom','agility','serenity')
+    for t in range(len(self.featureMap)):
+      print(t,":",len(feature_col))
+      for f in self.featureMap[t]:
+        if f in colMap:
+          feature_col.append(colMap[f])
+          if include_all:
+            del colMap[f]
+    if include_all:
+      b = c = 0
+      for col in colMap:
+        if c == 290:
+          b += 1
+          c = 0
+        if c == 0:
+          print(len(self.featureMap)+b,":",len(feature_col))
+        feature_col.append(colMap[col])
+        c += 1
+    print(" :",len(feature_col))
+    return feature_col
+      
   def Writer(self):
     if self.writer is None:
       self.writer = [ None,
@@ -177,6 +212,7 @@ class NumeraiETL(ETL):
   def Split(self, mode, examples):
     self.mask[mode] = np.ones((examples), dtype=np.int8)
     nValid = int(self.validSplit * examples)
+    print("Valid split percent:", self.validSplit, " = ", nValid)
     if self.splitValidOnly:
       if mode == TrainingSet.TRAIN:
         nValid = 0
@@ -186,7 +222,9 @@ class NumeraiETL(ETL):
       filtered = np.random.choice(examples, nValid, replace=False)
       self.mask[mode][filtered] = 0
     self.examples[TrainingSet.TRAIN] += examples - nValid
+    print("Training examples:", self.examples[TrainingSet.TRAIN])
     self.examples[TrainingSet.VALID] += nValid
+    print("Validation examples:", self.examples[TrainingSet.VALID])
     self.nExamples = examples
 
   def Load(self, mode, reload=False):
@@ -202,6 +240,7 @@ class NumeraiETL(ETL):
 
     # apply train valid test split
     # after this, check self.mask[mode] whether an index is in train (True) or valid (False)
+    print(table.num_rows)
     if not reload:
       self.Split(mode, table.num_rows)
     else:
@@ -212,9 +251,10 @@ class NumeraiETL(ETL):
         self.mask[mode] = np.ones((self.nExamples), dtype=np.int8)
       self.examples[mode] = self.nExamples
       self.seqnum = 0
+    print(self.nExamples)
 
     eranum = table["era"][0].as_py()
-    print(eranum)
+    print("Era", eranum)
     if eranum == 'X':
       self.era = None
     else:
@@ -224,14 +264,23 @@ class NumeraiETL(ETL):
     # load features
     first_feature = 0
     last_feature  = 0
+    colMap = {}
     for n in range(table.shape[1]):
       if table.column_names[n].startswith("feature_"):
         if first_feature == 0:
           first_feature = n
+        colMap[table.column_names[n]] = n
         last_feature = n
-    X_cols = range(first_feature, last_feature+1)
+    if self.featureMap is None:
+      X_cols = range(first_feature, last_feature+1)
+    else:
+      #print(self.featureMap)
+      #print(colMap, first_feature, last_feature)
+      X_cols = self.FeatureColsFromMap(colMap, first_feature, last_feature)
+    print("mapped", len(X_cols), "columns")
     X = table.select(X_cols)
     self.X = np.empty(X.shape)
+    print("shape", X.shape)
     for col in range(X.shape[1]):
       self.X[:,col] = X.column(col).to_numpy()
     
@@ -286,7 +335,7 @@ class NumeraiETL(ETL):
     # Make sure we have initialized a writer
     for m in range(self.nExamples):
       # Take an example if selected for the current mode
-      if mode == TrainingSet.TEST or self.mask[dataset][m] == (mode == TrainingSet.TRAIN):
+      if mode == TrainingSet.TEST or (mode == TrainingSet.TRAIN and self.mask[dataset][m] == 1) or (mode == TrainingSet.VALID and self.mask[dataset][m] == 0):
         example, eranum, examples, target = self.TrainingExample(m)
         # if writing TFRecord per era check for a new era
         #if balance and (eranum // 4) != (self.eranum // 4):
