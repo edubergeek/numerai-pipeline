@@ -789,11 +789,11 @@ with strategy.scope():
 # %%
 with strategy.scope():
   # Train the model
-  #if args.trial:
-  #  nm.modelTrial = args.trial
-  #else:
-  #  nm.modelTrial = 1
-  nm.modelTrial = 1
+  if args.trial:
+    nm.modelTrial = args.trial
+  else:
+    nm.modelTrial = 1
+  #nm.modelTrial = 1
   nm.sModelPath = os.path.join(".", nm.GetModelName())
   nm.SetLoss(hyperParam['loss'])
   nm.SetMonitor(hyperParam['monitor'])
