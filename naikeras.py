@@ -64,8 +64,9 @@ class BestEpoch(Callback):
 class PlotLoss(Callback):
   def __init__(self, metric='val_loss'):
     super().__init__()
-    self.metric = metric
-    matplotlib.interactive(True)
+    self.accmode = (metric == 'val_accuracy')
+    self.metric = 'val_loss'
+    matplotlib.interactive(False)
     
 #  def __del__(self):
 #    plt.close('all')
@@ -75,6 +76,9 @@ class PlotLoss(Callback):
     self.x = []
     self.loss_y = []
     self.metric_y = []
+    if self.accmode:
+      self.acc_y = []
+      self.valacc_y = []
     self.logs = []
     self.fig = plt.figure()
 
@@ -101,12 +105,18 @@ class PlotLoss(Callback):
     self.x.append(self.i)
     self.loss_y.append(logs.get('loss'))
     self.metric_y.append(logs.get(self.metric))
+    if self.accmode:
+      self.acc_y.append(logs.get('accuracy'))
+      self.valacc_y.append(logs.get('val_accuracy'))
     self.i += 1
 
     #clear_output(wait=True)
     plt.clf()
     plt.plot(self.x, self.loss_y, label="loss")
     plt.plot(self.x, self.metric_y, label=self.metric)
+    if self.accmode:
+      plt.plot(self.x, self.acc_y, label="accuracy")
+      plt.plot(self.x, self.valacc_y, label="val_accuracy")
     plt.legend()
     plt.show(block=False);
     plt.draw();
