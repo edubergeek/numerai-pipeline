@@ -44,20 +44,20 @@ esac
 
 # Autotrain Config:
 cat <<EOF >train.conf
-model		target	ver	rev	trial	arch	epoch	epochs	batch	lr	epsilon	loss	monitor		mode	begin	transform
-mlp		36	1	2	1	NR	0	50	1024	1e-4	0.0	mae	val_loss	all	0	NaN,2,2|Slice,0,2376
-cnn 		37	1	1	1	NR	0	50	1024	1e-4	0.0	mae	val_loss	all	0	NaN,2,2|Slice,0,2376|YX,2376,1
+model		target	ver	rev	trial	arch	epoch	epochs	batch	lr	decay	epsilon	loss	monitor		mode	begin	optimizer	datadir		transform
+mlp		36	1	2	1	NR	0	50	1024	1e-4	0	0.0	mae	val_loss	all	0	adam		./data		NaN,2,2|Slice,0,2376
+cnn 		37	1	1	1	NR	0	50	1024	1e-4	0	0.0	mae	val_loss	all	0	adam		./data		NaN,2,2|Slice,0,2376|YX,2376,1
 EOF
 
-MODELS='mlp cnn'
+MODELS='cnn mlp'
 
 for m in $MODELS
 do
-  grep "^$m" train.conf | while read model target version rev trial arch epoch epochs batch lr epsilon loss monitor mode begin transform
+  grep "^$m" train.conf | while read model target version rev trial arch epoch epochs batch lr decay epsilon loss monitor mode begin optimizer datadir transform
   do
     case $mode in
       all)
-        python train.py --begin $begin --model $model --version $version --revision $rev --trial $trial --epoch $epoch --arch $arch --transform $transform --round 1 --epochs $epochs --batch_size $batch --lr $lr --epsilon $epsilon --loss $loss --monitor $monitor --target $target --train $tensorboard
+        python train.py --begin $begin --model $model --version $version --revision $rev --trial $trial --epoch $epoch --arch $arch --transform $transform --round 1 --epochs $epochs --batch_size $batch --lr $lr --optimizer $optimizer --decay $decay --epsilon $epsilon --loss $loss --monitor $monitor --target $target --datadir $datadir --train $tensorboard
 	# poke the best epoch into predict.conf
 	epoch=`bash bestepoch.sh $model $version $revision $trial`
 	echo "Best epoch is $epoch"
@@ -67,7 +67,7 @@ do
 	#mv temp.conf predict.conf
         ;;
       era)
-        python train.py --model $model --version $version --trial $trial --arch $arch --transform $transform --round 1 --epochs $epochs --batch_size $batch --lr $lr --epsilon $epsilon --loss $loss --monitor $monitor --target $target --trainera $tensorboard
+        python train.py --model $model --version $version --trial $trial --arch $arch --transform $transform --round 1 --epochs $epochs --batch_size $batch --lr $lr --optimizer $optimizer --decay $decay --epsilon $epsilon --loss $loss --monitor $monitor --target $target --datadir $datadir --trainera $tensorboard
         ;;
       *)
         echo mode error in train.conf
