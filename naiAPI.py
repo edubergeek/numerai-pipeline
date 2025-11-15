@@ -63,7 +63,7 @@ class NumeraiAPI:
     # Default to RAIN values
     self.version = self.DR_ATLAS
     self.archive="parquet"
-    self.type="_int8"
+    self.type=""
     self.trainPrefix="train"
     self.validPrefix="validation"
     self.livePrefix="live"
