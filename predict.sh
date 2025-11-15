@@ -2,7 +2,7 @@
 
 ETLDIR=./live
 
-python download.py --live --version 5.0
+python download.py --live --version ${DR_VERSION}
 python etl.py --live --dir $ETLDIR
 
 MODELS='cnn mlp'
