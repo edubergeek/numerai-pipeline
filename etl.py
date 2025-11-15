@@ -98,8 +98,8 @@ if not os.path.exists(dataRoot):
 etl = NumeraiETL('.', dataRoot, feature_meta = args.features, valid_split = args.split, shard_size = args.shard)
 
 # If in balance mode don't step on train, valid, test data file prefixes
-if args.balance:
-  etl.outputPart = [None, "balance", "balanceval", "ignore"]
+#if args.balance:
+#  etl.outputPart = [None, "balance", "balanceval", "ignore"]
 
 etl.OpenDatasets(byEra=args.eras, balance=args.balance)
 
