@@ -305,7 +305,7 @@ class NumeraiModel():
         _, yPred = self.model.predict(features['x'], self.batchSize)
       elif self.hparam['arch'] == 'XGB' or self.hparam['arch'] == 'LGB':
         yPred = self.model.predict(features['x'].numpy())
-      elif self.hparam['arch'] == 'NC':
+      elif self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'CC':
         yPred = self.model.predict(features['x'], self.batchSize)
       else:
         yPred = self.model.predict(features['x'], self.batchSize)[:,0]
@@ -313,7 +313,10 @@ class NumeraiModel():
       for t in self.hparam[transform]:
         if t['name'] == 'Sparse':
           print(yPred.shape)
-          yPred = self.PredictTargetX(yPred)
+          #yPred = self.PredictTargetX(yPred)
+          ySparse = yPred
+          yPred = np.argmax(ySparse, axis=1)
+          yPred = yPred / 4.0
         
       lid.append(yId)
       lpred.append(yPred)
