@@ -308,6 +308,12 @@ class Numerai:
   def ReadLive(self):
     return self.ReadParquet('live.parquet')
 
+  def SaveTestCSV(self):
+    # Save predictions as a CSV and upload to https://numer.ai
+    testCSV = self.GetModelFullName() + "_test.csv"
+    self.dfValid[self.keyPrediction].to_csv(testCSV, header=True)
+    return testCSV
+
   def SaveSubmissionCSV(self):
     # Save predictions as a CSV and upload to https://numer.ai
     submissionCSV = self.GetModelFullName() + ".csv"
