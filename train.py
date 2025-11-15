@@ -10,7 +10,7 @@ import tensorflow as tf
 import lightgbm as lgb
 from tensorflow import keras
 from tensorflow.keras.metrics import SparseCategoricalAccuracy
-from tensorflow.keras.losses import SparseCategoricalCrossentropy
+from tensorflow.keras.losses import SparseCategoricalCrossentropy, MeanAbsoluteError
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, TensorBoard
 from tensorflow.keras.optimizers import Adam, AdamW
 from keras.optimizers.schedules import LearningRateSchedule
@@ -173,10 +173,10 @@ def replace_NaN(features, targets):
 def replace_Sparse(features, targets):
     for t in hyperParam[TRANSFORM]:
       if t['name'] == 'Sparse':
-        nClass = float(t['arg1'])
+        nClass = int(t['arg1'])
         #targetVal = float(t['arg2'])
-        #targets = targets * tf.constant(nClass, dtype=tf.float32)
-        targets = tf.one_hot(targets, nClass)
+        targets = targets * tf.constant(nClass-1, dtype=tf.float32)
+        #targets = tf.one_hot(targets, nClass)
     return features, targets
 
 def remap_autoencoder(features, targets):
@@ -234,8 +234,8 @@ class NumeraiModel():
     self.dft = None
     self.epochs = hyperParam["epochs"]
     self.begin = hyperParam["begin"]
-    self.monitor = 'val_loss'
-    self.loss = 'mse'
+    self.monitor = hyperParam["monitor"]
+    self.loss = hyperParam["loss"]
     self.mode = 'min'
     self.isTrained = False
     self.useTensorboard = False
@@ -252,10 +252,11 @@ class NumeraiModel():
       self.model = lgb.Booster(model_file=self.modelFile)
     else:
       self.model = tf.keras.models.load_model(self.modelFile)
-      if self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'CC':
-        self.Compile(self.model, loss='sparse_categorical_crossentropy', metric=['accuracy'])
-      else:
-        self.Compile(self.model)
+#      if self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'CC':
+#        self.Compile(self.model, loss='sparse_categorical_crossentropy', metric=['accuracy'])
+#      else:
+#        self.Compile(self.model)
+      self.Compile(self.model)
 
   def GetModelFile(self):
     return "%s/%sv%dr%dt%d-e%d%s" %(self.sModelPath, self.sModelName, self.modelVersion, self.modelRevision, self.modelTrial, self.modelEpoch, self.sModelSuffix)
@@ -352,7 +353,7 @@ class NumeraiModel():
         if t['name'] == 'Sparse':
           dataset = dataset.map(replace_Sparse, num_parallel_calls=at)
 
-    if self.hparam['arch'] == 'AE':
+    if self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'AC':
       dataset = dataset.map(remap_autoencoder, num_parallel_calls=at)
     
     dataset = dataset.batch(self.batchSize).prefetch(at).repeat(count=1)
@@ -370,7 +371,7 @@ class NumeraiModel():
   def SaveSubmissionCSV(self):
     # Save predictions as a CSV and upload to https://numer.ai
     submissionCSV = self.GetModelFullName() + ".csv"
-    if (self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'TF') and self.dft['prediction'].ndim == 1:
+    if (self.hparam['arch'] == 'AE'or self.hparam['arch'] == 'AC' or self.hparam['arch'] == 'TF') and self.dft['prediction'].ndim == 1:
       pred = [x for row in self.dft['prediction'] for x in row]
       self.dft['prediction'] = pred
     self.dft.to_csv(submissionCSV, header=True, index=False)
@@ -403,7 +404,7 @@ class NumeraiModel():
   def Compile(self, model, loss=None, metric=None, loss_weight=None):
     # compile the model  
 
-    if self.hparam['arch'] == 'CC':
+    if self.hparam['optimizer'] == 'adamw':
       total_steps = int(self.hparam['steps'] / self.batchSize * self.epochs)
       warmup_epoch_percentage = 0.10
       warmup_steps = int(total_steps * warmup_epoch_percentage)
@@ -412,7 +413,17 @@ class NumeraiModel():
       self.optimizer = AdamW(learning_rate=self.hparam['lr'], weight_decay=self.hparam['decay'])
     else:
       self.optimizer = Adam(learning_rate=self.hparam['lr'])
-    if self.hparam['arch'] == 'AE':
+    if self.hparam['arch'] == 'AC':
+      loss = SparseCategoricalCrossentropy(from_logits=True)
+      losses = {
+        #"target_output": self.loss,
+        "target_output": MeanAbsoluteError(),
+        "input_output": loss,
+      }
+      weights = {"target_output": 1.0, "input_output": self.hparam['epsilon']}
+      metrics = [self.loss, SparseCategoricalAccuracy(name="accuracy")]
+      model.compile(optimizer=self.optimizer, loss=losses, loss_weights=weights, metrics=metrics)
+    elif self.hparam['arch'] == 'AE':
       losses = {
         "target_output": self.loss,
         "input_output": self.loss,
@@ -420,7 +431,7 @@ class NumeraiModel():
       lossWeights = {"target_output": 1.0, "input_output": self.hparam['epsilon']}
       model.compile(optimizer=self.optimizer, loss=losses, loss_weights=lossWeights, metrics=metric)
     elif self.hparam['arch'] == 'CC':
-      loss = SparseCategoricalCrossentropy(from_logits=True)
+      loss = SparseCategoricalCrossentropy(from_logits=False)
       metrics = [SparseCategoricalAccuracy(name="accuracy"),]
       model.compile( optimizer=self.optimizer, loss=loss, metrics=metrics)
     else:
@@ -459,7 +470,7 @@ class NumeraiModel():
     # model.Train()
     # elif arch == 'LGB':
     #  model.Train()
-    if not (self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'NR' or self.hparam['arch'] == 'CC'):
+    if not (self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'AC' or self.hparam['arch'] == 'NC' or self.hparam['arch'] == 'NR' or self.hparam['arch'] == 'CC'):
       print("Unsupported arch=%s in Train" %(self.hparam['arch']))
       return 0
     
@@ -501,7 +512,7 @@ class NumeraiModel():
     for features in ds:
       yId = nm.GetList(features['id'])
       yId = list(yId)
-      if self.hparam['arch'] == 'AE':
+      if self.hparam['arch'] == 'AE' or self.hparam['arch'] == 'AC':
         _, yPred = nm.model.predict(features['x'], self.batchSize)
       else:
         if self.hparam['arch'] == 'XGB' or self.hparam['arch'] == 'LGB':
@@ -607,58 +618,46 @@ PROGRESS_INTERVAL = 10
 
 # %%
 if IS_JUPYTER:
-  sys.argv.append('--epochs')
-  sys.argv.append('10')
-  sys.argv.append('--target')
-  sys.argv.append('36')
-  sys.argv.append('--batch_size')
-  sys.argv.append('128')
-  #sys.argv.append('--steps')
-  #sys.argv.append('2940')
-  sys.argv.append('--lr')
-  sys.argv.append('1e-5')
-  sys.argv.append('--decay')
-  sys.argv.append('1e-6')
-  #sys.argv.append('--epsilon')
-  #sys.argv.append('20.0')
-  sys.argv.append('--model')
-  sys.argv.append('m33')
   sys.argv.append('--arch')
   sys.argv.append('NR')
-  sys.argv.append('--monitor')
-  sys.argv.append('val_loss')
   sys.argv.append('--version')
   sys.argv.append('1')
   sys.argv.append('--revision')
   sys.argv.append('0')
   sys.argv.append('--trial')
   sys.argv.append('1')
+  sys.argv.append('--epochs')
+  sys.argv.append('10')
+  sys.argv.append('--target')
+  sys.argv.append('36')
+  sys.argv.append('--batch_size')
+  sys.argv.append('512')
+  sys.argv.append('--lr')
+  sys.argv.append('1e-3')
+  #sys.argv.append('--decay')
+  #sys.argv.append('1e-6')
+  #sys.argv.append('--epsilon')
+  #sys.argv.append('5.0')
+  sys.argv.append('--model')
+  sys.argv.append('mlp')
+  sys.argv.append('--monitor')
+  sys.argv.append('val_loss')
   sys.argv.append('--transform')
-  sys.argv.append('NaN,-1,-1|Slice,0,2376|ZP,12:360,0:35:325:460:511:836:976:1121:1216:1506:1796:2086:2376')
+  sys.argv.append('NaN,-1,-1|Slice,0,1536|XY,48,32')
+  sys.argv.append('--datadir')
+  sys.argv.append('./data/balance')
   sys.argv.append('--trainpat')
   sys.argv.append('train*.tfr')
   sys.argv.append('--validpat')
   sys.argv.append('valid*.tfr')
-  sys.argv.append('--round')
-  sys.argv.append('0')
+  #sys.argv.append('--round')
+  #sys.argv.append('0')
   sys.argv.append('--epoch')
   sys.argv.append('0')
-  #sys.argv.append('Slice,0,1536|XY,48,32|Sparse,5')
-  #sys.argv.append('NaN,-1,-1|Slice,0,1536|XY,48,32')
-  #sys.argv.append('--transform')
-  #sys.argv.append('Slice,0,1050')
-  #sys.argv.append('--ensemble1')
-  #sys.argv.append('diorite,AE,5,breccia,-')
-  #sys.argv.append('--ensemble2')
-  #sys.argv.append('geode,XGB,2,schist,-')
-  #sys.argv.append('--etransform')
-  #sys.argv.append('YX,41,5')
-  #sys.argv.append('--epsilon')
-  #sys.argv.append('0.05')
-  #sys.argv.append('--patience')
-  #sys.argv.append('5')
-  #sys.argv.append('--threshold')
-  #sys.argv.append('1e-6')
+  sys.argv.append('--patience')
+  sys.argv.append('5')
+  sys.argv.append('--threshold')
+  sys.argv.append('1e-6')
   sys.argv.append('--train')
   print(sys.argv)
 
@@ -679,6 +678,7 @@ parser.add_argument("--epsilon", type=float, default=1.0, help="epsilon")
 parser.add_argument("--epochs", type=int, default=20, help="training epochs")
 parser.add_argument("--transform", default='-', help="transform")
 parser.add_argument("--arch", default="NR", help="model architecture")
+parser.add_argument("--optimizer", default="adam", help="optimizer")
 parser.add_argument("--ensemble1", default='-', help="1st ensemble model,arch,version")
 parser.add_argument("--etransform", default='-', help="post-ensemble transform")
 parser.add_argument("--ensemble2", default='-', help="2nd ensemble model,arch,version")
@@ -730,6 +730,7 @@ hyperParam['steps'] = args.steps
 hyperParam['decay_steps'] = args.decay_steps
 hyperParam['epsilon'] = args.epsilon
 hyperParam['arch'] = args.arch
+hyperParam['optimizer'] = args.optimizer
 hyperParam['loss'] = args.loss
 hyperParam['monitor'] = args.monitor
 hyperParam['transform'] = []
@@ -854,16 +855,18 @@ if False:
 # %%
 if False:
   for ex in X:
-    x = ex[0][0]
-    y = ex[1][0]
-    print(x, y)
-    #print(ex)
+    print(ex)
+    break
+
 
 
 # %%
 if False:
-  print(ex[0][0], ex[1][0][0], ex[1][1][0])
-  print(ex[0][1], ex[1][0][1], ex[1][1][1])
+    dx = ex[0][0]
+    dy = ex[1][0]
+    #print(x, y)
+    print(dx[0:10])
+    print(dy)
 
 # %%
 #tfr_test_file = "./data/%s_0.tfr"%(hyperParam['model'])
