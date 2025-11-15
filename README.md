@@ -53,6 +53,7 @@ Obviously this is just the highest numbered epoch so it's a convenience script.
 
 ## Release Notes
 -    1.0 - added support for ATLAS data release
+-    1.3 - added support for autoencoding classifier and force download
 
 ## Todo
 There are endless improvements to be made to any software project.
